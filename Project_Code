@@ -1,0 +1,770 @@
+--RAMADAN GANNUD
+--Video Rental Store Database
+----------------------------------------------------------------------------
+--1
+CREATE OR REPLACE PROCEDURE member_registration
+(	p_member_id		      NUMBER,
+	p_password			    VARCHAR2,	
+	p_name 			        VARCHAR2,
+  p_email_address 	  VARCHAR2, 
+  p_phone_number 		  VARCHAR2,
+ 	p_registration_date	DATE,
+	p_expiration_date		DATE) 
+IS
+    v_count		    NUMBER;
+  	v_status  		CHAR;
+    
+BEGIN
+	IF p_member_id <= 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+	SELECT 	COUNT(*)
+	INTO		v_count
+	FROM		member
+	WHERE		member_id = p_member_id;
+
+	IF v_count != 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+	IF LENGTH(p_password) < 10 THEN 
+      	DBMS_OUTPUT.PUT_LINE('Passsword is too short!');
+		RETURN;
+	END IF; 
+  
+  IF LENGTH(p_password) > 30 THEN 
+      	DBMS_OUTPUT.PUT_LINE('Passsword is too long!');
+		RETURN;
+	END IF; 
+  	IF p_name is NULL THEN 
+          	DBMS_OUTPUT.PUT_LINE('Invalid name!');
+		RETURN;
+	END IF;
+
+     	IF p_email_address is NULL THEN 
+          	DBMS_OUTPUT.PUT_LINE('Invalid email address!');
+		RETURN;
+	END IF;
+
+    	IF p_registration_date IS NULL OR 
+        TO_CHAR(p_registration_date, 'yyyymmdd') >  TO_CHAR(sysdate, 'yyyymmdd')
+        THEN  DBMS_OUTPUT.PUT_LINE('Invalid registration date!');
+        RETURN;
+      END IF;
+
+      IF p_expiration_date IS NULL OR
+          TO_CHAR(p_expiration_date, 'yyyymmdd') < TO_CHAR(p_registration_date, 'yyyymmdd') 
+          THEN DBMS_OUTPUT.PUT_LINE('Invalid expiration date!');
+          RETURN;
+      END IF;
+  
+      INSERT INTO member 
+            VALUES(p_member_id, p_password, UPPER(p_name),p_email_address, p_phone_number, p_registration_date, p_expiration_date, sysdate);
+      COMMIT;
+      
+          DBMS_OUTPUT.PUT_LINE(INITCAP(p_name) || ' has been added into the member table.');
+		
+EXCEPTION
+    WHEN OTHERS THEN
+		DBMS_OUTPUT.PUT_LINE('My exception: ' || 
+    TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;
+/
+--TESTS
+EXEC member_registration(2009, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2013', '01-SEP-2018');
+EXEC member_registration(2010, 'abc', 'FORD', 'ford1@yahoo.com', '3123622222', '02-SEP-2013', '01-SEP-2018');
+EXEC member_registration(2010, 'assvndsvnlvsvsavsvsnavlasvsavnsavk', 'FORD', 'ford1@yahoo.com', '3123622222', '02-SEP-2013', '01-SEP-2018');
+EXEC member_registration(1234, 'efg12345abcD', 'Adams', '', '3123621111', '02-SEP-2013', '01-SEP-2018');
+EXEC member_registration(1234, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2017', '01-SEP-2018');
+EXEC member_registration(1234, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2014', '01-SEP-2013');
+EXEC member_registration(1111, '12345678910', 'Ramadan', 'ramrimrow@yahoo.com', '7738143231', sysdate, '19-MAY-2020');
+
+/
+----------------------------------------------------------------------------------------------------------------------------
+--2
+CREATE OR REPLACE PROCEDURE member_new_expiration_date 
+(p_member_id 		          NUMBER,
+  p_new_expiration_date 	DATE)
+IS 
+  v_count   NUMBER;
+
+BEGIN
+
+	SELECT 	COUNT(*)
+	INTO		v_count
+	FROM		member
+	WHERE		member_id = p_member_id;
+
+	IF v_count = 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+      UPDATE MEMBER
+      SET expiration_date = p_new_expiration_date, last_update_date = sysdate
+      WHERE member_id = p_member_id;
+      COMMIT;
+          DBMS_OUTPUT.PUT_LINE('The expiration date has been updated');
+		
+  EXCEPTION
+    WHEN OTHERS THEN
+		DBMS_OUTPUT.PUT_LINE('My exception: ' || 
+    TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;
+/
+-------------------------------------------------------------------------------------------------------------------------
+--3
+CREATE OR REPLACE PROCEDURE video_search 
+  (p_video_name 	  VARCHAR2, 
+   p_video_format 	VARCHAR2 DEFAULT NULL)
+IS
+
+CURSOR c_video_title IS
+SELECT v.video_title_id, copy_status
+FROM video_title v, video_copy c
+WHERE UPPER(video_name) like '%' || UPPER(p_video_name) ||  '%' 
+AND v.video_title_id = c.video_title_id AND 
+UPPER(v.format) = decode(UPPER(p_video_format),NULL,v.format,UPPER(p_video_format))
+AND copy_status != 'D';
+
+CURSOR c_video_copy IS
+SELECT video_name, c.video_copy_id, format, copy_status, checkout_date, due_date
+FROM video_copy c, video_rental_record r, video_title v 
+WHERE v.video_title_id (+)= c.video_title_id and c.video_copy_id = r.video_copy_id(+) 
+AND UPPER(v.format) = decode(UPPER(p_video_format),NULL,v.format,UPPER(p_video_format)) AND copy_status != 'D'
+AND UPPER(video_name) like '%' || UPPER(p_video_name) ||  '%' 
+ORDER BY  video_name, video_copy_id, checkout_date desc;
+
+v_count            NUMBER:=0;
+v_title_id         video_title.video_title_id%TYPE;
+v_copy_status       varchar2(20);
+v_n                NUMBER:=0;
+v_video_copy_id    NUMBER:=0;
+
+BEGIN
+          
+                  FOR idx IN c_video_title LOOP
+                    IF idx.copy_status = 'A' THEN v_n := v_n +1; END IF;
+                    v_count :=v_count +1; 
+                  END LOOP;
+                IF v_count = 0 THEN
+                      IF p_video_format IS NULL THEN
+                           DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||'. ****'); 
+                      ELSE DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||' ('||p_video_format||'). ****');
+                      END IF;
+                ELSE 
+                      IF p_video_format IS NULL THEN
+                      DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||'. (Available copies: '||v_n||') ****');
+                      ELSE DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||' ('||p_video_format
+                                                ||'). (Available copies: '||v_n||') ****');
+                      END IF;
+                      DBMS_OUTPUT.PUT_LINE('VIDEO_NAME              VIDEO_COPY_ID    FORMAT     COPY_STATUS      CHECKOUT_DATE         DUE_DATE');
+                      DBMS_OUTPUT.PUT_LINE('----------------------------------------------------------------------------------------------------');
+                                     
+                  
+                  FOR idx IN c_video_copy LOOP
+                    IF idx.video_copy_id != v_video_copy_id THEN
+                      IF idx.copy_status = 'A' THEN v_copy_status := 'Available';
+                        DBMS_OUTPUT.PUT_LINE(RPAD(idx.video_name,20)||LPAD(idx.video_copy_id,17)||'    '||
+                        RPAD(idx.format,11)||RPAD(v_copy_status,17)||LPAD(NULL,13)||LPAD(NULL,17));
+                      ELSIF idx.copy_status = 'R' THEN v_copy_status := 'Rented' ; 
+                         DBMS_OUTPUT.PUT_LINE(RPAD(idx.video_name,20)||LPAD(idx.video_copy_id,17)||'    '||
+                         RPAD(idx.format,11)||RPAD(v_copy_status,17)||LPAD(TO_CHAR(idx.checkout_date,'dd-MON-yyyy'),13)
+                         ||LPAD(TO_CHAR(idx.due_date,'dd-MON-yyyy'),17));
+                       END IF; 
+                    END IF;
+                   v_video_copy_id:= idx.video_copy_id;
+                  END LOOP;
+              END IF;
+      
+END;
+/
+--TESTS
+EXEC video_search('ocean');
+EXEC video_search('PRETTY WOMAN', 'Blu-Ray');
+EXEC video_search('Pretty Woman');
+EXEC video_search('Another');
+EXEC video_search('ANOTHER', 'Dvd');
+EXEC video_search('Story');
+/
+-----------------------------------------------------------------------------------------------------
+--4
+CREATE OR REPLACE PROCEDURE video_checkout
+(	p_member_id			        NUMBER, 
+	p_video_copy_id 		    NUMBER, 
+	p_video_checkout_date 	DATE )
+IS
+
+CURSOR c_video_copy IS
+SELECT video_title_id, return_date 
+FROM video_copy v, video_rental_record r 
+WHERE v.video_copy_id = r.video_copy_id AND return_date IS NULL AND member_id = p_member_id;
+
+v_n          NUMBER:=0;
+v_due_date   DATE;
+v_title_id   video_title.video_title_id%TYPE;
+
+BEGIN
+    
+    SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id;
+      IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid member id!'); RETURN; END IF; 
+    
+    SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id and expiration_date < sysdate; 
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This membership is expired!'); RETURN; END IF; 
+     
+     SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid video copy id!'); RETURN; END IF;
+     
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id 
+           AND copy_status != 'A';
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This copy is not available'); RETURN; END IF;
+    
+    IF p_video_checkout_date IS NULL OR TO_CHAR(p_video_checkout_date, 'yyyymmdd') > TO_CHAR(sysdate, 'yyyymmdd') THEN
+          	DBMS_OUTPUT.PUT_LINE('Invalid checkout date!'); RETURN; END IF;
+      
+    SELECT count(*) INTO v_n FROM video_rental_record where member_id = p_member_id and return_date is null;
+        IF v_n = 5 THEN DBMS_OUTPUT.PUT_LINE('Maximum limit of rented copies at once is reached!'); RETURN; END IF;
+        
+    SELECT video_title_id INTO v_title_id FROM video_copy WHERE video_copy_id = p_video_copy_id ; 
+        For idx IN c_video_copy LOOP
+          IF idx.video_title_id = v_title_id THEN v_n := v_n + 1; END IF;
+        END LOOP;       
+            IF v_n > 1 THEN DBMS_OUTPUT.PUT_LINE('This member has the same video title not returned');RETURN; END IF;
+
+    SELECT maximum_checkout_days INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        v_due_date := sysdate + v_n;
+        
+    INSERT INTO video_rental_record VALUES (p_member_id, p_video_copy_id, p_video_checkout_date,v_due_date,''); COMMIT;
+    UPDATE video_copy set copy_status = 'R' WHERE video_copy_id = p_video_copy_id; COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Tables are updated for this copy');
+
+EXCEPTION
+	WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('My exception: ' || TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;	
+/
+
+--TESTS
+exec video_checkout (4943,25,'20-may-15');
+exec video_checkout (2008,25,'20-may-15');
+exec video_checkout (2007,2022,'20-may-15');
+exec video_checkout (2007,6000,'20-july-15');
+exec video_checkout (2001,6004,sysdate);
+exec video_checkout (2001,6015,sysdate);
+/
+------------------------------------------------------------------------------------------------------------------
+--5
+
+CREATE OR REPLACE PROCEDURE video_return
+ (p_video_copy_id 		NUMBER, 
+  p_video_return_date 	DATE)
+IS 
+v_n     NUMBER;
+
+BEGIN
+    
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid video copy id!'); RETURN; END IF;
+        
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id 
+           AND copy_status != 'R';
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This copy is not rented!'); RETURN; END IF;
+      
+    IF p_video_return_date IS NULL OR TO_CHAR(p_video_return_date, 'yyyymmdd') > TO_CHAR(sysdate, 'yyyymmdd') THEN
+          	DBMS_OUTPUT.PUT_LINE('Invalid return date!'); RETURN; END IF;
+      
+      
+  UPDATE video_rental_record SET return_date = p_video_return_date WHERE video_copy_id = p_video_copy_id; COMMIT;
+  UPDATE video_copy SET copy_status = 'A' WHERE video_copy_id = p_video_copy_id; COMMIT;
+      DBMS_OUTPUT.PUT_LINE('This copy is checked in successfully');
+
+END;
+/
+
+--TESTS
+EXEC video_return (4943,'20-may-15');
+EXEC video_return (6001,'20-may-15');
+EXEC video_return (6005,'20-july-15');
+EXEC video_return (6005,sysdate);
+
+/
+----------------------------------------------------------------------------------------------------------------------------
+--6
+
+CREATE OR REPLACE PROCEDURE print_unreturned_video
+  (p_member_id NUMBER)
+IS
+
+CURSOR c_unreturned IS
+SELECT r.video_copy_id, video_name, format, checkout_date, due_date
+FROM video_copy c, video_rental_record r, video_title v
+WHERE r.member_id = p_member_id AND return_date IS NULL
+AND r.video_copy_id = c.video_copy_id AND c.video_title_id = v.video_title_id
+ORDER BY due_date, video_name;
+
+v_n                  NUMBER;
+v_member_id          NUMBER;
+v_name               member.name%TYPE;
+v_expiration_date    DATE;
+v_min_checkout_date  DATE;
+v_max_checkout_date  DATE;
+
+BEGIN
+      SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id;
+          IF v_n = 0 THEN 
+              DBMS_OUTPUT.PUT_LINE('The member (id = '||p_member_id||') is not in the member table.');
+          
+          ELSE
+              SELECT member_id, name, expiration_date
+              INTO v_member_id, v_name, v_expiration_date
+              FROM member 
+              WHERE member_id = p_member_id;
+              
+              SELECT MIN(checkout_date), MAX(checkout_date)
+              INTO v_min_checkout_date, v_max_checkout_date
+              FROM video_rental_record
+              WHERE member_id = p_member_id;
+              
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                 DBMS_OUTPUT.PUT_LINE('Member ID:               '||v_member_id);
+                 DBMS_OUTPUT.PUT_LINE('Member Name:             '||v_name);
+                 DBMS_OUTPUT.PUT_LINE('Expiration Date:         '||TO_CHAR(v_expiration_date,'dd-MON-yyyy'));
+              IF v_min_checkout_date IS NULL THEN
+                 DBMS_OUTPUT.PUT_LINE('First Checkout Date:     N/A');
+              ELSE
+                 DBMS_OUTPUT.PUT_LINE('First Checkout Date:     '||TO_CHAR(v_min_checkout_date,'dd-MON-yyyy'));
+              END IF;
+              IF v_max_checkout_date IS NULL THEN
+                 DBMS_OUTPUT.PUT_LINE('Last Checkout Date:      N/A');
+              ELSE
+                 DBMS_OUTPUT.PUT_LINE('Last Checkout Date:      '||TO_CHAR(v_max_checkout_date,'dd-MON-yyyy'));
+              END IF;
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+    
+              SELECT count(*) INTO v_n FROM video_rental_record 
+              WHERE member_id = p_member_id and return_date IS NULL;
+                 DBMS_OUTPUT.PUT_LINE('Number of Unreturned Videos:  '||v_n);
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                 
+                 IF v_n> 0 THEN
+                    FOR idx IN c_unreturned LOOP
+                        DBMS_OUTPUT.PUT_LINE('Video Copy ID:   '||idx.video_copy_id);
+                        DBMS_OUTPUT.PUT_LINE('Video Name:      '||idx.video_name);
+                        DBMS_OUTPUT.PUT_LINE('Format:          '||idx.format);
+                        DBMS_OUTPUT.PUT_LINE('Checkout Date:   '||TO_CHAR(idx.checkout_date,'dd-MON-yyyy'));
+                        DBMS_OUTPUT.PUT_LINE('Due Date:        '||TO_CHAR(idx.due_date,'dd-MON-yyyy'));
+                        DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                    END LOOP;
+                 END IF;
+           END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('My exception: ' || TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+  
+END;
+/
+--TESTS
+exec print_unreturned_video (90);
+exec print_unreturned_video (2004);
+exec print_unreturned_video (2008);
+exec print_unreturned_video (2002);
+/
+-----------------------------------------------------------------------------------------------------------------------
+--7
+CREATE OR REPLACE PACKAGE video_pkg IS
+
+ PROCEDURE member_registration
+     (p_member_id		      NUMBER,
+      p_password			    VARCHAR2,	
+      p_name 			        VARCHAR2,
+      p_email_address 	  VARCHAR2, 
+      p_phone_number 		  VARCHAR2,
+      p_registration_date	DATE,
+      p_expiration_date		DATE);
+  
+ PROCEDURE member_new_expiration_date 
+     (p_member_id 		        NUMBER, 
+      p_new_expiration_date 	DATE);
+  
+ PROCEDURE video_search 
+     (p_video_name 	  VARCHAR2,
+      p_video_format 	VARCHAR2 DEFAULT NULL);
+ 
+  PROCEDURE video_checkout
+     (p_member_id			       NUMBER, 
+      p_video_copy_id 		   NUMBER, 
+      p_video_checkout_date  DATE );
+  
+  PROCEDURE video_return
+     (p_video_copy_id 		  NUMBER, 
+      p_video_return_date 	DATE);
+  
+  PROCEDURE print_unreturned_video
+     (p_member_id NUMBER);
+
+END video_pkg;
+/
+------------------------------------------------------------------------
+
+CREATE OR REPLACE PACKAGE BODY video_pkg IS
+--1 
+ PROCEDURE member_registration
+   (p_member_id		      NUMBER,
+    p_password			    VARCHAR2,	
+    p_name 			        VARCHAR2,
+    p_email_address 	  VARCHAR2, 
+    p_phone_number 		  VARCHAR2,
+    p_registration_date	DATE,
+    p_expiration_date		DATE) 
+IS
+    v_count		    NUMBER;
+  	v_status  		CHAR;
+BEGIN
+	IF p_member_id <= 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+	SELECT 	COUNT(*)
+	INTO		v_count
+	FROM		member
+	WHERE		member_id = p_member_id;
+
+	IF v_count != 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+	IF LENGTH(p_password) < 10 THEN 
+      	DBMS_OUTPUT.PUT_LINE('Passsword is too short!');
+		RETURN;
+	END IF; 
+  
+  IF LENGTH(p_password) > 30 THEN 
+      	DBMS_OUTPUT.PUT_LINE('Passsword is too long!');
+		RETURN;
+	END IF; 
+  	IF p_name is NULL THEN 
+          	DBMS_OUTPUT.PUT_LINE('Invalid name!');
+		RETURN;
+	END IF;
+
+     	IF p_email_address is NULL THEN 
+          	DBMS_OUTPUT.PUT_LINE('Invalid email address!');
+		RETURN;
+	END IF;
+
+    	IF p_registration_date IS NULL OR 
+        TO_CHAR(p_registration_date, 'yyyymmdd') >  TO_CHAR(sysdate, 'yyyymmdd')
+        THEN  DBMS_OUTPUT.PUT_LINE('Invalid registration date!');
+        RETURN;
+      END IF;
+
+      IF p_expiration_date IS NULL OR
+          TO_CHAR(p_expiration_date, 'yyyymmdd') < TO_CHAR(p_registration_date, 'yyyymmdd') 
+          THEN DBMS_OUTPUT.PUT_LINE('Invalid expiration date!');
+          RETURN;
+      END IF;
+  
+      INSERT INTO member 
+            VALUES(p_member_id, p_password, UPPER(p_name),p_email_address, p_phone_number, p_registration_date, p_expiration_date, sysdate);
+      COMMIT;
+             DBMS_OUTPUT.PUT_LINE(INITCAP(p_name) || ' has been added into the member table.');
+		
+EXCEPTION
+    WHEN OTHERS THEN
+		DBMS_OUTPUT.PUT_LINE('My exception: ' || 
+    TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;
+----------------------------------------------------------------------------------------------------------------------------
+--2
+PROCEDURE member_new_expiration_date 
+  (p_member_id 		NUMBER,
+   p_new_expiration_date 	DATE)
+IS 
+   v_count   NUMBER;
+
+BEGIN
+
+	SELECT 	COUNT(*)
+	INTO		v_count
+	FROM		member
+	WHERE		member_id = p_member_id;
+
+	IF v_count = 0 THEN
+		DBMS_OUTPUT.PUT_LINE('Invalid ID!');
+		RETURN;
+	END IF;
+
+      UPDATE MEMBER
+      SET expiration_date = p_new_expiration_date, last_update_date = sysdate
+      WHERE member_id = p_member_id;
+      COMMIT;
+          DBMS_OUTPUT.PUT_LINE('The expiration date has been updated');
+		
+  EXCEPTION
+    WHEN OTHERS THEN
+		DBMS_OUTPUT.PUT_LINE('My exception: ' || 
+    TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;
+-------------------------------------------------------------------------------------------------------------------------
+--3
+ PROCEDURE video_search 
+  (p_video_name 	  VARCHAR2,
+   p_video_format 	VARCHAR2 DEFAULT NULL)
+IS
+
+CURSOR c_video_title IS
+SELECT v.video_title_id, copy_status
+FROM video_title v, video_copy c
+WHERE UPPER(video_name) like '%' || UPPER(p_video_name) ||  '%' 
+AND v.video_title_id = c.video_title_id AND 
+UPPER(v.format) = decode(UPPER(p_video_format),NULL,v.format,UPPER(p_video_format))
+AND copy_status != 'D';
+
+
+CURSOR c_video_copy IS
+SELECT video_name, c.video_copy_id, format, copy_status, checkout_date, due_date
+FROM video_copy c, video_rental_record r, video_title v 
+WHERE v.video_title_id (+)= c.video_title_id and c.video_copy_id = r.video_copy_id(+) 
+AND UPPER(v.format) = decode(UPPER(p_video_format),NULL,v.format,UPPER(p_video_format)) AND copy_status != 'D'
+AND UPPER(video_name) like '%' || UPPER(p_video_name) ||  '%' 
+ORDER BY  video_name, video_copy_id, checkout_date desc;
+
+v_count            NUMBER:=0;
+v_title_id         video_title.video_title_id%TYPE;
+v_copy_status      varchar2(20);
+v_n                NUMBER:=0;
+v_video_copy_id    NUMBER:=0;
+
+BEGIN
+          
+                  FOR idx IN c_video_title LOOP
+                    IF idx.copy_status = 'A' THEN v_n := v_n +1; END IF;
+                    v_count :=v_count +1; 
+                  END LOOP;
+                IF v_count = 0 THEN
+                      IF p_video_format IS NULL THEN
+                           DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||'. ****'); 
+                      ELSE DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||' ('||p_video_format||'). ****');
+                      END IF;
+                ELSE 
+                      IF p_video_format IS NULL THEN
+                      DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||'. (Available copies: '||v_n||') ****');
+                      ELSE DBMS_OUTPUT.PUT_LINE('**** '||v_count||' results found for '||p_video_name||' ('||p_video_format
+                                                ||'). (Available copies: '||v_n||') ****');
+                      END IF;
+                      DBMS_OUTPUT.PUT_LINE('VIDEO_NAME              VIDEO_COPY_ID    FORMAT     COPY_STATUS      CHECKOUT_DATE         DUE_DATE');
+                      DBMS_OUTPUT.PUT_LINE('----------------------------------------------------------------------------------------------------');
+                                     
+                  
+                  FOR idx IN c_video_copy LOOP
+                    IF idx.video_copy_id != v_video_copy_id THEN
+                      IF idx.copy_status = 'A' THEN v_copy_status := 'Available';
+                        DBMS_OUTPUT.PUT_LINE(RPAD(idx.video_name,20)||LPAD(idx.video_copy_id,17)||'    '||
+                        RPAD(idx.format,11)||RPAD(v_copy_status,17)||LPAD(NULL,13)||LPAD(NULL,17));
+                      ELSIF idx.copy_status = 'R' THEN v_copy_status := 'Rented' ; 
+                         DBMS_OUTPUT.PUT_LINE(RPAD(idx.video_name,20)||LPAD(idx.video_copy_id,17)||'    '||
+                         RPAD(idx.format,11)||RPAD(v_copy_status,17)||LPAD(TO_CHAR(idx.checkout_date,'dd-MON-yyyy'),13)
+                         ||LPAD(TO_CHAR(idx.due_date,'dd-MON-yyyy'),17));
+                       END IF; 
+                    END IF;
+                   v_video_copy_id:= idx.video_copy_id;
+                  END LOOP;
+              END IF;
+      
+END;
+-----------------------------------------------------------------------------------------------------
+--4
+ PROCEDURE video_checkout
+   (p_member_id			        NUMBER, 
+    p_video_copy_id 		    NUMBER, 
+    p_video_checkout_date 	DATE )
+IS
+
+CURSOR c_video_copy IS
+SELECT video_title_id, return_date 
+FROM video_copy v, video_rental_record r 
+WHERE v.video_copy_id = r.video_copy_id AND return_date IS NULL AND member_id = p_member_id;
+
+v_n          NUMBER:=0;
+v_due_date   DATE;
+v_title_id   video_title.video_title_id%TYPE;
+
+BEGIN
+    
+    SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id;
+      IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid member id!'); RETURN; END IF; 
+    
+    SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id and expiration_date < sysdate; 
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This membership is expired!'); RETURN; END IF; 
+     
+     SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid video copy id!'); RETURN; END IF;
+     
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id 
+           AND copy_status != 'A';
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This copy is not available'); RETURN; END IF;
+    
+    IF p_video_checkout_date IS NULL OR TO_CHAR(p_video_checkout_date, 'yyyymmdd') > TO_CHAR(sysdate, 'yyyymmdd') THEN
+          	DBMS_OUTPUT.PUT_LINE('Invalid checkout date!'); RETURN; END IF;
+      
+    SELECT count(*) INTO v_n FROM video_rental_record where member_id = p_member_id and return_date is null;
+        IF v_n = 5 THEN DBMS_OUTPUT.PUT_LINE('Maximum limit of rented copies at once is reached!'); RETURN; END IF;
+        
+    SELECT video_title_id INTO v_title_id FROM video_copy WHERE video_copy_id = p_video_copy_id ; 
+        For idx IN c_video_copy LOOP
+          IF idx.video_title_id = v_title_id THEN v_n := v_n + 1; END IF;
+        END LOOP;       
+            IF v_n > 1 THEN DBMS_OUTPUT.PUT_LINE('This member has the same video title not returned');RETURN; END IF;
+
+
+    SELECT maximum_checkout_days INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        v_due_date := sysdate + v_n;
+        
+    INSERT INTO video_rental_record VALUES (p_member_id, p_video_copy_id, p_video_checkout_date,v_due_date,''); COMMIT;
+    UPDATE video_copy set copy_status = 'R' WHERE video_copy_id = p_video_copy_id; COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Tables are updated for this copy');
+
+EXCEPTION
+	WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('My exception: ' || TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+END;	
+------------------------------------------------------------------------------------------------------------------
+--5
+ PROCEDURE video_return
+  (p_video_copy_id 		  NUMBER, 
+   p_video_return_date 	DATE)
+IS 
+v_n     NUMBER;
+
+BEGIN
+    
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id;
+        IF v_n = 0 THEN DBMS_OUTPUT.PUT_LINE('Invalid video copy id!'); RETURN; END IF;
+        
+    SELECT count(*) INTO v_n FROM video_copy WHERE video_copy_id = p_video_copy_id 
+           AND copy_status != 'R';
+      IF v_n > 0 THEN DBMS_OUTPUT.PUT_LINE('This copy is not rented!'); RETURN; END IF;
+      
+    IF p_video_return_date IS NULL OR TO_CHAR(p_video_return_date, 'yyyymmdd') > TO_CHAR(sysdate, 'yyyymmdd') THEN
+          	DBMS_OUTPUT.PUT_LINE('Invalid return date!'); RETURN; END IF;
+      
+      
+  UPDATE video_rental_record SET return_date = p_video_return_date WHERE video_copy_id = p_video_copy_id; COMMIT;
+  UPDATE video_copy SET copy_status = 'A' WHERE video_copy_id = p_video_copy_id; COMMIT;
+      DBMS_OUTPUT.PUT_LINE('This copy is checked in successfully');
+
+END;
+----------------------------------------------------------------------------------------------------------------------------
+--6
+
+PROCEDURE print_unreturned_video
+  (p_member_id   NUMBER)
+IS
+
+CURSOR c_unreturned IS
+SELECT r.video_copy_id, video_name, format, checkout_date, due_date
+FROM video_copy c, video_rental_record r, video_title v
+WHERE r.member_id = p_member_id AND return_date IS NULL
+AND r.video_copy_id = c.video_copy_id AND c.video_title_id = v.video_title_id
+ORDER BY due_date, video_name;
+
+v_n                  NUMBER;
+v_member_id          NUMBER;
+v_name               member.name%TYPE;
+v_expiration_date    DATE;
+v_min_checkout_date  DATE;
+v_max_checkout_date  DATE;
+
+BEGIN
+      SELECT count(*) INTO v_n FROM member WHERE member_id = p_member_id;
+          IF v_n = 0 THEN 
+              DBMS_OUTPUT.PUT_LINE('The member (id = '||p_member_id||') is not in the member table.');
+          
+          ELSE
+              SELECT member_id, name, expiration_date
+              INTO v_member_id, v_name, v_expiration_date
+              FROM member 
+              WHERE member_id = p_member_id;
+              
+              SELECT MIN(checkout_date), MAX(checkout_date)
+              INTO v_min_checkout_date, v_max_checkout_date
+              FROM video_rental_record
+              WHERE member_id = p_member_id;
+              
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                 DBMS_OUTPUT.PUT_LINE('Member ID:               '||v_member_id);
+                 DBMS_OUTPUT.PUT_LINE('Member Name:             '||v_name);
+                 DBMS_OUTPUT.PUT_LINE('Expiration Date:         '||TO_CHAR(v_expiration_date,'dd-MON-yyyy'));
+              IF v_min_checkout_date IS NULL THEN
+                 DBMS_OUTPUT.PUT_LINE('First Checkout Date:     N/A');
+              ELSE
+                 DBMS_OUTPUT.PUT_LINE('First Checkout Date:     '||TO_CHAR(v_min_checkout_date,'dd-MON-yyyy'));
+              END IF;
+              IF v_max_checkout_date IS NULL THEN
+                 DBMS_OUTPUT.PUT_LINE('Last Checkout Date:      N/A');
+              ELSE
+                 DBMS_OUTPUT.PUT_LINE('Last Checkout Date:      '||TO_CHAR(v_max_checkout_date,'dd-MON-yyyy'));
+              END IF;
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+    
+              SELECT count(*) INTO v_n FROM video_rental_record 
+              WHERE member_id = p_member_id and return_date IS NULL;
+                 DBMS_OUTPUT.PUT_LINE('Number of Unreturned Videos:  '||v_n);
+                 DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                 
+                 IF v_n> 0 THEN
+                    FOR idx IN c_unreturned LOOP
+                        DBMS_OUTPUT.PUT_LINE('Video Copy ID:   '||idx.video_copy_id);
+                        DBMS_OUTPUT.PUT_LINE('Video Name:      '||idx.video_name);
+                        DBMS_OUTPUT.PUT_LINE('Format:          '||idx.format);
+                        DBMS_OUTPUT.PUT_LINE('Checkout Date:   '||TO_CHAR(idx.checkout_date,'dd-MON-yyyy'));
+                        DBMS_OUTPUT.PUT_LINE('Due Date:        '||TO_CHAR(idx.due_date,'dd-MON-yyyy'));
+                        DBMS_OUTPUT.PUT_LINE('--------------------------------------');
+                    END LOOP;
+                 END IF;
+           END IF;
+
+EXCEPTION
+	WHEN OTHERS THEN DBMS_OUTPUT.PUT_LINE('My exception: ' || TO_CHAR(SQLCODE) || '   ' || SQLERRM);
+  
+END;
+
+END video_pkg;
+/
+------------------------------------------------------------------------------------------------------
+--TESTS
+
+      EXEC video_pkg.member_registration(2009, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2013', '01-SEP-2018');
+      EXEC video_pkg.member_registration(2010, 'abc', 'FORD', 'ford1@yahoo.com', '3123622222', '02-SEP-2013', '01-SEP-2018');
+      EXEC video_pkg.member_registration(2010, 'assvndsvnlvsvsavsvsnavlasvsavnsavk', 'FORD', 'ford1@yahoo.com', '3123622222', '02-SEP-2013', '01-SEP-2018');
+      EXEC video_pkg.member_registration(1234, 'efg12345abcD', 'Adams', '', '3123621111', '02-SEP-2013', '01-SEP-2018');
+      EXEC video_pkg.member_registration(1234, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2017', '01-SEP-2018');
+      EXEC video_pkg.member_registration(1234, 'efg12345abcD', 'Adams', 'adams_1@yahoo.com', '3123621111', '02-SEP-2014', '01-SEP-2013');
+      EXEC video_pkg.member_registration(2222, '12345678910', 'Ramadan', 'ramrimrow@yahoo.com', '7738143231', sysdate, '19-MAY-2020');
+      
+      EXEC video_pkg.video_search('ocean');
+      EXEC video_pkg.video_search('PRETTY WOMAN', 'Blu-Ray');
+      EXEC video_pkg.video_search('Pretty Woman');
+      EXEC video_pkg.video_search('Another');
+      EXEC video_pkg.video_search('ANOTHER', 'Dvd');
+      EXEC video_pkg.video_search('Story');
+
+      exec video_pkg.video_checkout (4943,25,'20-may-15');
+      exec video_pkg.video_checkout (2008,25,'20-may-15');
+      exec video_pkg.video_checkout (2007,2022,'20-may-15');
+      exec video_pkg.video_checkout (2007,6000,'20-july-15');
+      exec video_pkg.video_checkout (2001,6004,sysdate);
+
+      exec video_pkg.video_return (4943,'20-may-15');
+      exec video_pkg.video_return (6001,'20-may-15');
+      exec video_pkg.video_return (6005,'20-july-15');
+
+      exec video_pkg.print_unreturned_video (90);
+      exec video_pkg.print_unreturned_video (2004);
+      exec video_pkg.print_unreturned_video (2008);
+      exec video_pkg.print_unreturned_video (2002);
+-------------------------------------------------------------------------------------------
+
